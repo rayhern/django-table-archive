@@ -5,7 +5,6 @@ from datetime import datetime
 from datetime import timedelta
 import traceback
 import re
-import time
 
 
 def dictfetchall(cursor):
@@ -67,10 +66,8 @@ class Command(BaseCommand):
 
         if len(items_list) > 0:
             with connections[self.archive_db].cursor() as cursor:
-                print('bulk inserting into database...')
-                tuple_list = []
-                for d in items_list:
-                    tuple_list.append(tuple(d.values()))
+                print('Bulk inserting into database...')
+                tuple_list = [tuple(d.values()) for d in items_list]
                 # use the first item to build our placeholders for the query, and column names.
                 placeholders = ', '.join(['%s'] * len(items_list[0]))
                 columns = ', '.join(items_list[0].keys())
