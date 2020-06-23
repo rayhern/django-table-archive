@@ -19,6 +19,7 @@ def dictfetchall(cursor):
 class Command(BaseCommand):
     archive_db = settings.ARCHIVE_DB_ALIAS
     archive_db_name = settings.DATABASES[settings.ARCHIVE_DB_ALIAS]['NAME']
+
     def handle(self, *args, **options):
 
         print('archive has started @ %s!' % datetime.utcnow())
