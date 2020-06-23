@@ -1,6 +1,4 @@
-=====================
-django-table-archive
-=====================
+# django-table-archive
 
 Django table archive is an app that will allow you to backup your models in MySQL to a different database.
 
