@@ -43,8 +43,10 @@ class Command(BaseCommand):
                 self.archive_table(table, delta, date_field)
 
     def archive_table(self, source_table, delta, date_field):
-        # now_days = datetime.now() - timedelta(days=int(delta))
-        now_days = datetime.now() - timedelta(minutes=5)
+        now_days = datetime.now() - timedelta(days=int(delta))
+
+        # For testing purposes.
+        # now_days = datetime.now() - timedelta(minutes=5)
 
         # Get last id that was archived, and use it.
         try:
