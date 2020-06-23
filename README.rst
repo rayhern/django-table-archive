@@ -7,14 +7,16 @@ Django table archive is an app that will allow you to backup your models in MySQ
 Quick start
 -----------
 
-1. Add "django_table_sharding" to your INSTALLED_APPS setting like this::
+1. ``pip install django-table-archive``
+
+2. Add "django_table_archive" to your INSTALLED_APPS setting like this::
 
     INSTALLED_APPS = [
         ...
         'django_table_archive',
     ]
 
-2. Add this to your settings.py::
+3. Add this to your settings.py::
 
 	ARCHIVE_TABLES = [
 	    {
@@ -23,5 +25,3 @@ Quick start
 	        'date_field': 'date_created'
 	    }
 	]
-
-
