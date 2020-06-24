@@ -25,3 +25,12 @@ Quick start
 	        'date_field': 'date_created'
 	    }
 	]
+
+This archive process will also work with django-table-sharding package. It will look for all tables matching the name
+and back them all up.
+
+table = The table to archive.
+
+days_old = Archive all items that are over 90 days old.
+
+date_field = The datetime used to check if it is over 90 days old.
