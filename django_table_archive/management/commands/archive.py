@@ -8,6 +8,7 @@ import re
 
 
 def dictfetchall(cursor):
+    """Get rows from sql cursor as dict."""
     columns = [col[0] for col in cursor.description]
     return [
         dict(zip(columns, row))
@@ -15,23 +16,42 @@ def dictfetchall(cursor):
     ]
 
 
+def chunks(source_list, batch_size):
+    """Yield successive n-sized chunks from source_list."""
+    for i in range(0, len(source_list), batch_size):
+        yield source_list[i:i+batch_size]
+
+
+def normalize_spaces(text):
+    """Used for cleaning continuous white space in strings."""
+    return re.sub(r'\s+', ' ', str(text))
+
+
 class Command(BaseCommand):
+    default_db = settings.ARCHIVE_PRIMARY_DB
     archive_db = settings.ARCHIVE_DB_ALIAS
     archive_db_name = settings.DATABASES[settings.ARCHIVE_DB_ALIAS]['NAME']
+    batch_size = 10000
+    verbosity = 1
 
     def handle(self, *args, **options):
 
-        print('archive has started @ %s!' % datetime.utcnow())
+        self.verbosity = int(options.get('verbosity', 1))
+
+        print('archive has started. verbosity: %s. @ %s!' % (self.verbosity, datetime.utcnow()))
 
         for archive_dict in settings.ARCHIVE_TABLES:
+            db_table = archive_dict.get('table', None)
+            delta = archive_dict.get('days_old', None)
+            date_field = archive_dict.get('date_field', None)
 
-            db_table = archive_dict['table']
-            delta = archive_dict['days_old']
-            date_field = archive_dict['date_field']
+            if db_table is None or delta is None or date_field is None:
+                print('Entry in settings.ARCHIVE_TABLES missing.')
+                continue
 
             tables = []
             try:
-                with connections['default'].cursor() as cursor:
+                with connections[self.default_db].cursor() as cursor:
                     rows = self.run_sql(cursor, 'SHOW TABLES LIKE "%s%%"' % db_table)
                     if len(rows) > 0:
                         tables = [row[0] for row in rows]
@@ -39,14 +59,14 @@ class Command(BaseCommand):
                 print(traceback.format_exc())
 
             for table in tables:
-                self.create_table_if_none_exists(table)
+                self.create_archive_table_if_none_exists(table)
                 self.archive_table(table, delta, date_field)
 
     def archive_table(self, source_table, delta, date_field):
+        """
+        Archives database items older than X days. Uses batch size when inserting into database.
+        """
         now_days = datetime.now() - timedelta(days=int(delta))
-
-        # For testing purposes.
-        # now_days = datetime.now() - timedelta(minutes=5)
 
         # Get last id that was archived, and use it.
         try:
@@ -59,25 +79,36 @@ class Command(BaseCommand):
         except:
             last_pk = 0
 
-        with connections['default'].cursor() as cursor:
-            cursor.execute('SELECT * FROM %s WHERE %s < "%s" AND id > %s' % (
-                source_table, date_field, now_days.strftime('%Y-%m-%d %H:%M:%S'), last_pk))
-            items_list = dictfetchall(cursor)
+        print('Getting items to archive...')
+        try:
+            with connections[self.default_db].cursor() as cursor:
+                cursor.execute('SELECT * FROM %s WHERE %s < "%s" AND id > %s' % (
+                    source_table, date_field, now_days.strftime('%Y-%m-%d %H:%M:%S'), last_pk))
+                items_list = dictfetchall(cursor)
+        except:
+            print('Error: Could not retrieve items to archive.')
+            return
 
         if len(items_list) > 0:
             with connections[self.archive_db].cursor() as cursor:
-                print('Bulk inserting into database...')
-                tuple_list = [tuple(d.values()) for d in items_list]
+                print('Bulk inserting into database %s. table %s...' % (self.archive_db_name, source_table))
                 # use the first item to build our placeholders for the query, and column names.
                 placeholders = ', '.join(['%s'] * len(items_list[0]))
                 columns = ', '.join(items_list[0].keys())
-                try:
-                    cursor.executemany("INSERT INTO %s ( %s ) VALUES ( %s )" % (
-                        source_table, columns, placeholders), tuple_list)
-                except:
-                    print(traceback.format_exc())
+                n_chunks = chunks(items_list, self.batch_size)
+                for chunk in n_chunks:
+                    tuple_list = [tuple(d.values()) for d in chunk]
+                    try:
+                        cursor.executemany("INSERT INTO %s ( %s ) VALUES ( %s )" % (
+                            source_table, columns, placeholders), tuple_list)
+                    except:
+                        print(traceback.format_exc())
 
-    def create_table_if_none_exists(self, source_table):
+    def create_archive_table_if_none_exists(self, source_table):
+        """
+        Check the archive database to see if it contains the destination table. If not, this will
+        create the table without foreign keys.
+        """
         create_table = False
         with connections[self.archive_db].cursor() as cursor:
             rows = self.run_sql(cursor, '''
@@ -88,16 +119,17 @@ class Command(BaseCommand):
                 create_table = True
 
         if create_table is True:
-            print('archive table not found creating (without constraints)...')
-            with connections['default'].cursor() as cursor:
+            print('Archive table not found creating (without constraints)...')
+            with connections[self.default_db].cursor() as cursor:
                 rows = self.run_sql(cursor, 'SHOW CREATE TABLE %s;' % source_table)
                 create_table_sql = rows[0][1]
                 create_table_sql = create_table_sql[create_table_sql.index('(') + 1:]
                 items = create_table_sql.split(',')
-                real_items = []
-                for item in items:
-                    if 'CONSTRAINT' not in item:
-                        real_items.append(item)
+                real_items = [item.strip() for item in items if 'CONSTRAINT' not in item]
+                # real_items = []
+                # for item in items:
+                #     if 'CONSTRAINT' not in item:
+                #         real_items.append(item)
                 create_table_sql = 'CREATE TABLE %s (%s)' % (source_table, ','.join(real_items))
             with connections[self.archive_db].cursor() as cursor:
                 rows = self.run_sql(cursor, create_table_sql)
@@ -109,7 +141,8 @@ class Command(BaseCommand):
         """
         try:
             # For debugging.
-            print('sql> %s' % self.normalize_spaces(sql.strip()))
+            if self.verbosity > 1:
+                print('sql> %s' % normalize_spaces(sql.strip()))
             cursor.execute(sql)
             rows = cursor.fetchall()
             return rows
@@ -117,6 +150,3 @@ class Command(BaseCommand):
             print(traceback.format_exc())
         return []
 
-    def normalize_spaces(self, text):
-        """Used for cleaning continuous white space in strings."""
-        return re.sub(r'\s+', ' ', str(text))
